@@ -71,10 +71,8 @@ function tracker_init() {
   });
 }
 
-function tracker_update(img) {
-  if(!tracker) tracker_init();
-  tracking.track(img, tracker, { camera: true } );
-};
+tracker_init();
+
 
 var counter = 0;
 
@@ -88,7 +86,7 @@ function tracker_paint(frame) {
   let h = buffer.size.height;
   let bpr = buffer.size.bytesPerRow;
 
-  // tracker would like an image
+  // feed a canvas to tracker - later improve it to accept the uint8array
   let canvas = document.getElementById('image_canvas');
   let ctx = canvas.getContext('2d');
   if(canvas.width != w) canvas.width = w;
@@ -105,12 +103,9 @@ function tracker_paint(frame) {
   }
   ctx.putImageData(imageData,0,0);
 
-  // ... 
-  // let img = new Image();
-  let img = document.getElementById("testimage");
-  img.src = canvas.toDataURL("image/jpg");
-  tracker_update(img);
+  tracking.track(canvas);
 
+  // debug
   document.getElementById("debug").innerHTML = "width:"+w+" height:" + h + " bpr:" + bpr + " counter:"+counter; counter++;
 }
  
