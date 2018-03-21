@@ -1,0 +1,197 @@
+<!doctype html>
+<html>
+<head>
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+<title>webxr binding to tracking.js</title>
+<link rel="stylesheet" href="tracking.js/examples/assets/demo.css">
+
+<style>
+body, html {
+  -webkit-user-select: none;
+  user-select: none;
+}
+</style>
+
+<link rel="stylesheet" href="../common.css"/>
+
+<!-- webxr -->
+<script src="../libs/three.js"></script>
+<script type="module" src="../../polyfill/XRPolyfill.js"></script>
+<script nomodule src="../../dist/webxr-polyfill.js"></script>
+<script src="../common.js"></script>
+
+<!-- tracking.js -->
+<script src="tracking.js/build/tracking-min.js"></script>
+<script src="tracking.js/build/data/face-min.js"></script>
+
+</head>
+
+
+<body>
+
+<!-- debug -->
+<div style="position:absolute;top:0px" id="debug">Debugging Output</div>
+
+<!-- main view -->
+<div style="border:3px solid red;position:absolute;top:0px;width:480px;height:270px" id="target" >
+<div>
+<br/>
+
+<!-- face tracker results -->
+<canvas style="border:3px solid green;position:absolute;top:270px;width:480px;height:270px" id="tracker_canvas" width="480" height="270">
+</canvas>
+
+<!-- a copy of the video frame -->
+<canvas style="border:3px solid green;position:absolute;top:540px;width:480px;height:270px" id="image_canvas" width="480" height="270">
+</canvas>
+
+<img style="position:absolute;top:810px" id="testimage" src="tracking.js/examples/assets/faces.jpg"></img>
+
+<script>
+
+var tracker = 0;
+
+function tracker_init() {
+  var canvas = document.getElementById('tracker_canvas');
+  var context = canvas.getContext('2d');
+  context.fillStyle = "#ff0000"; context.fillRect(0,0,canvas.width,canvas.height);
+  tracker = new tracking.ObjectTracker('face');
+  tracker.setInitialScale(4);
+  tracker.setStepSize(2);
+  tracker.setEdgesDensity(0.1);
+  tracker.on('track', function(event) {
+    context.fillStyle = "#0000ff"; context.fillRect(0,0,canvas.width,canvas.height);
+    //context.clearRect(0, 0, canvas.width, canvas.height);
+    event.data.forEach(function(rect) {
+      context.strokeStyle = '#00ffff';
+      context.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    });
+  });
+}
+
+function tracker_update(img) {
+  if(!tracker) tracker_init();
+  tracking.track(img, tracker, { camera: true } );
+};
+
+var counter = 0;
+
+function tracker_paint(frame) {
+
+  // webxr data
+  if(frame.pixelFormat != "YUV420P") alert("Unsupported format for video frame");
+  let buffer = frame.buffers[0];
+  let pixels = new Uint8Array(buffer.buffer);
+  let w = buffer.size.width;
+  let h = buffer.size.height;
+  let bpr = buffer.size.bytesPerRow;
+
+  // tracker would like an image
+  let canvas = document.getElementById('image_canvas');
+  let ctx = canvas.getContext('2d');
+  if(canvas.width != w) canvas.width = w;
+  if(canvas.height != h) canvas.height = h;
+  let imageData = ctx.getImageData(0,0,w,h);
+  let data = imageData.data;
+  for(let y = 0; y < h; y++ ) {
+    for(let x = 0; x < w; x++) {
+      data[(y*w+x)*4+0] = pixels[(y*bpr+x)];
+      data[(y*w+x)*4+1] = pixels[(y*bpr+x)];
+      data[(y*w+x)*4+2] = pixels[(y*bpr+x)];
+      data[(y*w+x)*4+3] = 255;
+    }
+  }
+  ctx.putImageData(imageData,0,0);
+
+  // ... 
+  // let img = new Image();
+  let img = document.getElementById("testimage");
+  img.src = canvas.toDataURL("image/jpg");
+  tracker_update(img);
+
+  document.getElementById("debug").innerHTML = "width:"+w+" height:" + h + " bpr:" + bpr + " counter:"+counter; counter++;
+}
+ 
+</script>
+
+
+
+
+<script id="worker1" type="javascript/worker">
+self.addEventListener('message',  function(event){
+	var frame = event.data.frame
+	var camera = event.data.camera
+	postMessage ({frame:frame});
+});
+</script>
+
+
+
+
+<script>
+
+var beginTime = ( performance || Date ).now(), prevTime = beginTime, frames = 0;
+
+class ARAnchorExample extends XRExampleBase {
+
+	constructor(domElement){
+		super(domElement, false, true, true)
+	}
+
+	newSession() {
+		var blob = new Blob([ document.querySelector('#worker1').textContent ], { type: "text/javascript" });
+
+		// Note: window.webkitURL.createObjectURL() in Chrome 10+.
+		this.worker = new Worker(window.URL.createObjectURL(blob));
+					
+		var self = this;
+		this.worker.onmessage = function(ev) {
+			tracker_paint(ev.data.frame);
+			self.requestVideoFrame();
+		}
+					
+		this.worker.addEventListener('error', (e) => { 
+			console.log("worker error:" + e) 
+		});
+
+
+		this.setVideoWorker(this.worker);
+
+	}
+
+	initializeScene(){
+		let box = new THREE.Mesh(
+			new THREE.BoxBufferGeometry(0.1, 0.1, 0.1),
+			new THREE.MeshPhongMaterial({ color: '#DDFFDD' })
+		)
+		box.position.set(0, 0, 0)
+		this.floorGroup.add(box)
+
+		this.scene.add(new THREE.AmbientLight('#FFF', 0.2))
+		let directionalLight = new THREE.DirectionalLight('#FFF', 0.6)
+		directionalLight.position.set(0, 10, 0)
+		this.scene.add(directionalLight)
+	}
+
+	updateScene(frame){
+		this.lightEstimate = frame.lightEstimate || 0;
+	}
+
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+	setTimeout(() => {
+		try {
+			window.pageApp = new ARAnchorExample(document.getElementById("target"))
+		} catch(e) {
+			console.error('page error', e)
+		}
+	}, 100);
+});
+
+</script>
+
+</body>
+</html>
